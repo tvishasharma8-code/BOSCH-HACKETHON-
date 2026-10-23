@@ -5,3 +5,16 @@ __pycache__/
 runs/
 .iz_kill
 harness/.faultctl_state.json
+
+# The OTel demo is cloned inside this folder on some machines. It is its own
+# git repo and is never part of ours (R1/R13: the agent never touches demo source).
+opentelemetry-demo/
+
+# Phase 0 working notes, not a deliverable.
+PERSON_C_PREP.md
+
+.vscode/
+.pytest_cache/
+*.egg-info/
+build/
+dist/

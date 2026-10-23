@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "incident-zero"
+version = "0.1.0"
+description = "Incident Zero — AI on-call engineer: from alert to safe, approved fix."
+requires-python = ">=3.11"
+
+# Announce before adding anything here (README section 9).
+# No LLM SDK on purpose: Gemini is called over REST with httpx.
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "docker>=7.0",
+    "jsonschema>=4.21",
+    "typer>=0.12",
+    "rich>=13.7",
+    "jinja2>=3.1",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+iz = "agent.cli:app"
+# Owner B fills in envkit/faultctl/cli.py; entry points resolve lazily so this
+# is safe to declare now.
+faultctl = "envkit.faultctl.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["agent*", "envkit*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
