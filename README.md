@@ -2,9 +2,12 @@
 
 > **Build plan, architecture and phase-wise execution guide.**
 > This file is written so it can be handed directly to **Claude Code** (or any coding agent) to continue the work.
-> Tip: copy this file to `CLAUDE.md` at the repo root so Claude Code loads it automatically every session.
-> The submission README required by the organizers (setup, running, approval gate, kill switch, limitations) is a
-> separate file built from the template's README template in Phase 5. Keep both.
+> Don't copy this whole file into `CLAUDE.md`. It's too long to load every session, and its status tracker changes
+> constantly. Keep `CLAUDE.md` short and point it here.
+> In Phase 5 this plan moves to `PLAN.md`, and `README.md` becomes the submission README (setup, running, approval
+> gate, kill switch, limitations).
+> **Team of 5:** Hemanth, Aditi, Tvisha, Mohit, Pavan. **Organizers told us to build `faultctl`, the Action API and
+> the JSON schema ourselves.** `faultctl` is done (`harness/faultctl.py`); we're building the other two.
 
 **Theme:** Agentic AI for IT Operations — *from alert to safe, approved fix.*
 **Target system:** OpenTelemetry Demo ("Astronomy Shop"), running locally with Docker Compose.
@@ -17,13 +20,16 @@
 
 1. **Read Section 1 (Hard Rules) before writing any code.** Violating them costs points or disqualifies the team.
 2. **Check Section 13 (Status Tracker)** to see which phase we are in and what is done. Update it at the end of every task.
-3. **Never guess organizer-provided interfaces.** The JSON schema, Action API endpoints, `faultctl` commands, scoring-harness
-   entrypoint and deployment-history source come from the template repo. If they are not yet recorded in
-   `docs/DISCOVERY.md`, stop and ask the user, or inspect the template repo read-only and record what you find.
+3. **We define `faultctl`, the Action API and the JSON schema ourselves** (organizer instruction). They live in
+   `harness/faultctl.py`, `action_api/` and `schema/incident.schema.json`. The hidden test may still use the
+   organizers' own faults, so the agent must **never depend on our `faultctl` incident names**. Record
+   facts about the environment in `docs/DISCOVERY.md`. If something is unknown, ask the user rather than guess.
 4. **Work phase by phase.** Do not start a later phase's features until the current phase's checkpoint criteria pass.
    After 12:00 on Day 2, **no new features** — bug fixes, tests and docs only.
-5. **Keep changes small and committed often.** Each of the 3 team members must commit their own work. Do not squash
+5. **Keep changes small and committed often.** Each of the 5 team members must commit their own work. Do not squash
    other members' commits. Use commit messages like `feat(tools): add prometheus query tool`.
+   **Git flow:** branch from `dev` (`<name>/<area>`), open PRs into `dev`, and Hemanth merges `dev` → `main` only
+   after a checkpoint run passes. Stick to your own files to avoid conflicts.
 6. **Every module gets a test.** Run `pytest -q` before declaring a task done.
 7. **When in doubt about safety, choose the safer option** (dry run, escalate, refuse) and leave a `# SAFETY:` comment.
 8. **Be honest in docs.** If something does not work, write it in `EVALUATION.md` / Known Limitations. Hiding failures loses points.
@@ -36,7 +42,7 @@ These come directly from the challenge brief. Code must enforce them, not just d
 
 | # | Rule | How we enforce it in code |
 |---|------|---------------------------|
-| R1 | Never edit demo source code, demo configuration, `faultctl`, or the scoring harness. | Agent has no write tools. No file-write or shell tools exposed to the LLM. Docker client wrapper is read-only. |
+| R1 | Never edit demo source code, demo configuration, `faultctl`, or the scoring harness. | Agent has no write tools. No file-write or shell tools exposed to the LLM. Docker client wrapper is read-only. `harness/` (faultctl) is test tooling: `agent/` must never import, call or read it. |
 | R2 | The system may only be changed through the **Action API**. | `execution/action_client.py` is the *only* module allowed to make state-changing calls. Test asserts no other module imports it. |
 | R3 | No state-changing action without **explicit human approval** (dry runs excepted). | Executor requires an `ApprovalRecord` whose hash matches the exact action payload. State machine forbids `EXECUTING` without `APPROVED`. |
 | R4 | Diagnosis must come **from telemetry only** — never from feature-flag settings, flag files, the flag UI or the flag API. | No tool talks to flagd / flag UI / flag API. `flagd` and flag-UI containers are excluded from log/container tools. `feature_flag.*` span attributes and flag-evaluation log lines are redacted. A test greps `agent/` for forbidden strings. |
@@ -46,14 +52,16 @@ These come directly from the challenge brief. Code must enforce them, not just d
 | R8 | Provide **dry-run mode** and a **kill switch**. | `--dry-run` is the default; `--live` required to execute. Kill switch = sentinel file + CLI command + SIGINT handler, checked before every step. |
 | R9 | Every action call is logged. | Append-only JSONL audit log in `runs/<incident_id>/audit.jsonl`. |
 | R10 | Every incident output must follow the **provided JSON schema**. | `reporting/schema_adapter.py` maps our internal model to the schema; output is validated with `jsonschema` before being written. |
-| R11 | All code written on the day, from **09:15**; all 3 members commit; AI coding assistants declared in the team form; every member can explain the code. | Process rule — see Section 10 (team split) and Phase 5 (team form). **Do not commit this plan or any code before 09:15 on the event day** (confirm with organizers whether a plan doc counts). |
+| R11 | All code written on the day, from **09:15**; all 5 members commit; AI coding assistants declared in the team form; every member can explain the code. | Process rule — see Section 8 (team split) and Phase 5 (team form). |
 | R12 | Code freeze / hard cutoff: **14:00 Day 2** (one slide says 16:30 — treat 14:00 as binding until organizers confirm). | Phase 6 finishes the final push by 13:50. |
 
 ### Forbidden-strings guard (implemented as `tests/test_forbidden_access.py`)
 
 The test scans every file under `agent/` and fails if it finds any of:
-`flagd`, `demo.flagd.json`, `/feature`, `flagd-ui`, `openfeature` (case-insensitive), port `8013`, `8016`,
-the ground-truth file name, or any import of `eval.`. (Keep the list in the test file, not in agent code.)
+`flagd`, `demo.flagd.json`, `/feature`, `/flagservice`, `flagd-ui`, `openfeature` (case-insensitive), ports `8013`,
+`8016`, `4000`, `faultctl`, any import of `harness`, the ground-truth file name, or any import of `eval.`.
+(Keep the list in the test file, not in agent code.) Exception: `agent/tools/common.py` may name `flagd`/`flagd-ui`
+in `EXCLUDED_SERVICES`. Allowlist that one line in the test.
 
 ---
 
@@ -89,31 +97,29 @@ to the deepest failing span, then check that component's logs and container heal
 
 ---
 
-## 3. Discovery — fill these in from the template repo (Phase 1)
+## 3. Discovery — environment facts (verified against the cloned demo)
 
-Claude Code: these are **unknown until the template repo is inspected**. Record findings in `docs/DISCOVERY.md`
-and update `config/settings.yaml`. Never invent them.
+Organizers told us to **define `faultctl`, the Action API and the JSON schema ourselves**. Record any new findings
+in `docs/DISCOVERY.md` and `config/settings.yaml`.
 
-| Item | Where to look | Value (fill in) |
-|------|---------------|-----------------|
-| Required JSON schema file path & required keys | template repo (`schema/`, `*.schema.json`) | TBD |
-| Action API base URL, auth, endpoints (restart / toggle flag / throttle loadgen / scale) | template repo docs / client | TBD |
-| Action API dry-run support (native or ours only) | Action API docs | TBD |
-| Action API action log location | Action API docs | TBD |
-| How `faultctl` injects / resets / lists practice incidents | `faultctl --help` | TBD |
-| Alert source (do organizers emit alerts, or do we detect?) | template / kickoff | TBD |
-| Entrypoint the hidden-test harness will call (CLI? HTTP? file drop?) | template / kickoff — **critical for 30 pts** | TBD |
-| Deployment-history source | template / Action API / kickoff | TBD (fallback: container start times + image tags) |
-| Offline incident bundle format & location | starter kit | TBD |
-| Prometheus URL & metric names (span metrics prefix varies by demo version) | `docker compose ps`, `GET /api/v1/label/__name__/values` | TBD (default `http://localhost:9090`) |
-| Jaeger query URL | `docker compose ps` | TBD (default `http://localhost:16686`) |
-| Logs backend (OpenSearch? collector debug? `docker logs`?) | `docker compose ps` | TBD |
-| Which Action API "toggle flag" names are allowed, and may the planner select one without reading flag state? | **ask organizers** | TBD |
-| Is `docker logs` / Docker Engine read access allowed as "container health"? | ask organizers (assumed yes, read-only) | TBD |
-| Final deadline: 14:00 vs 16:30 | ask organizers | TBD (assume 14:00) |
+| Item | Value |
+|------|-------|
+| JSON schema | **Ours:** `schema/incident.schema.json`. Hemanth builds it by Checkpoint 2, from the fields in Section 9 (`IncidentRecord`) |
+| Action API | **Ours:** `action_api/`, a small local HTTP service. Endpoints: `restart_service`, `toggle_feature_flag` (disabled by default, see 5.6), `throttle_load_generator`. `scale_service` is Kubernetes-only, so disabled on Compose. It logs every call to an append-only JSONL. Built Day 2 morning |
+| Action API dry-run | Ours: `dry_run=true` on every endpoint returns the exact call without executing |
+| `faultctl` | **Ours, done:** `python harness/faultctl.py list / inject <name> / status / reset`. App faults switch the demo's built-in flags; infra faults use Docker (stop, CPU limit, netem latency). Test tooling only |
+| Alert source | We detect it ourselves: an alert watcher polling Prometheus. Also accept `--alert alert.json` in case organizers feed alerts |
+| Hidden-test entrypoint | **Unknown. Ask organizers** (CLI? HTTP? file drop?). Critical for 30 pts |
+| Deployment history | No deploy system in the demo. Fallback: container image tags + `StartedAt` / `RestartCount` from read-only `docker inspect` |
+| Offline bundles | None provided. Optional: record our own with `faultctl` + tool outputs |
+| Prometheus | `http://localhost:9090` (exposed on host). Span metrics: `traces_span_metrics_calls_total` (labels `service_name`, `span_name`, `status_code`), `traces_span_metrics_duration_milliseconds_bucket`. Container CPU/mem from the collector's `docker_stats` receiver. Confirm names with `GET /api/v1/label/__name__/values` |
+| Jaeger | **Not on host :16686** (container port not mapped). Use the frontend proxy: `http://localhost:8080/jaeger/ui/api/traces`, `/api/services`, `/api/dependencies` |
+| Logs backend | Collector exports logs to **OpenSearch** (container port 9200, no fixed host port, not proxied). Options: read-only `docker port opensearch 9200`, Grafana datasource proxy at `localhost:8080/grafana/`, or `docker logs`. **Never edit compose files to expose it** (R1) |
+| Docker read access as "container health" | Assumed yes, read-only (`list`, `inspect`, `stats`, `logs`) |
+| Final deadline | 14:00 Day 2 (assume binding) |
 
-Note: In the OpenTelemetry Demo the main UIs are usually behind the frontend proxy on `http://localhost:8080`
-(`/jaeger/ui`, `/grafana`, `/loadgen`). The flag UI is also there — **the agent must never call it.**
+Note: the frontend proxy on `http://localhost:8080` also serves `/feature` and `/flagservice/`, which are the flag UI
+and flag API. **The agent must never call either.** The flag UI's own port is `4000`, flagd's are `8013`/`8016`.
 
 ---
 
@@ -261,7 +267,8 @@ Select with `--backend bundle --bundle path/`. All tests and the eval harness us
   `{"type":"container","service":"redis","status":"exited","restart_count":5}`.
 - `EvidenceValidator.validate(diagnosis)` checks:
   1. every cited evidence ID exists;
-  2. every quoted number / trace ID / log excerpt in the diagnosis appears in the cited evidence's key_facts or raw data;
+  2. every claim uses a **structured citation** `{evidence_id, fact_index}` that points at a real `key_facts` entry.
+     Don't parse numbers out of free text ("42%" vs `0.42` is brittle); generate the prose from verified facts;
   3. at least one cited evidence item references the claimed root-cause component;
   4. confidence ≥ 0.8 requires ≥ 2 *different* evidence types (e.g. trace + log, metric + container).
   Failure → diagnosis is downgraded (confidence capped) or the agent is asked once to fix it; second failure → ESCALATE.
@@ -311,16 +318,17 @@ Each step's rationale is logged — this is what we show judges ("visible, expla
 | Action | Typical fit (category) | Reversible? | Rollback |
 |--------|------------------------|-------------|----------|
 | `restart_service(service)` | container_down, resource_exhaustion (leak), stuck process | No | Escalate if not recovered |
-| `toggle_feature_flag(flag, state)` | app_error clearly tied to a toggleable behavior (**confirm usage rules with organizers**) | Yes | Toggle back |
+| `toggle_feature_flag(flag, state)` | **Disabled by default.** Choosing which flag to toggle without reading flag state is close to breaking R4. Enable only if the team decides how to map a telemetry diagnosis to a flag without reading flag config | Yes | Toggle back |
 | `throttle_load_generator(level)` | load_spike | Yes | Restore previous level |
-| `scale_service(service, replicas)` | resource_starvation / load (Kubernetes only — disable on Docker Compose) | Yes | Scale back |
+| `scale_service(service, replicas)` | resource_starvation / load (Kubernetes only, so **disabled on Docker Compose**) | Yes | Scale back |
 
 - Planner: deterministic mapping category → candidate actions, then a short LLM call (or rules) to fill params and
   write a 1–2 sentence reason + expected impact + risks. Output validated against the allowlist and against known
   service names. Categories like `network_degradation` or `dependency_unavailable` with no fitting action → **ESCALATE**
   with findings (that is a correct outcome).
 - Output: `ActionProposal{action_id, operation, params, reason, expected_impact, risks, reversible, rollback_plan, action_hash}`.
-  `action_hash = sha256(canonical_json(operation, params))`.
+  `action_hash = sha256(canonical_json(incident_id, action_id, operation, target_service, params))`, so an
+  approval can never be reused for a different incident or service.
 
 ### 5.7 Approval Gate — `agent/approval/`
 
@@ -359,7 +367,7 @@ Each step's rationale is logged — this is what we show judges ("visible, expla
 ### 5.11 Reporter — `agent/reporting/`
 
 - Internal `IncidentRecord` (our model) → `schema_adapter.to_schema()` → validated with `jsonschema` against the
-  organizer schema → `reports/<incident_id>.json`.
+  our schema (`schema/incident.schema.json`) → `reports/<incident_id>.json`.
 - Readable `reports/<incident_id>.md`: summary, timeline (from audit log), root cause, evidence table (IDs, quotes),
   investigation steps with rationale, action + approval, verification result, rollback/escalation, prevention suggestions,
   limitations/uncertainty.
@@ -387,7 +395,7 @@ incident-zero/
 ├── config/
 │   └── settings.yaml          # endpoints, thresholds, budgets, policy, excluded services
 ├── docs/
-│   ├── DISCOVERY.md           # facts learned from the template repo (Phase 1)
+│   ├── DISCOVERY.md           # environment facts (ports, metric names)
 │   └── architecture.png       # whiteboard photo acceptable
 ├── agent/
 │   ├── cli.py                 # `iz` commands
@@ -397,7 +405,7 @@ incident-zero/
 │   ├── orchestrator.py
 │   ├── llm/ {provider.py, prompts/*.md}
 │   ├── alerting/ {listener.py, rules.py}
-│   ├── tools/ {base.py, registry.py, redaction.py, docker_ro.py, metrics.py, traces.py, logs.py,
+│   ├── tools/ {common.py (shared result format, DONE), base.py, registry.py, redaction.py, docker_ro.py, metrics.py, traces.py, logs.py,
 │   │           containers.py, deployments.py, topology.py, backends/{live.py, bundle.py}}
 │   ├── evidence/ {store.py, validator.py}
 │   ├── investigation/ investigator.py
@@ -408,11 +416,14 @@ incident-zero/
 │   ├── verification/ verifier.py
 │   ├── reporting/ {schema_adapter.py, report.py, templates/report.md.j2}
 │   └── audit/ logger.py
+├── harness/                   # test tooling, NEVER imported or read by agent/
+│   └── faultctl.py            # inject / reset practice incidents (DONE)
+├── action_api/                # our Action API: the ONLY way to change the system (Day 2)
 ├── eval/                      # NEVER imported by agent/
 │   ├── ground_truth.yaml      # practice incident → expected component/category (from published list)
 │   ├── scorer.py
 │   └── run_eval.py
-├── schema/                    # organizer JSON schema (copied, unmodified)
+├── schema/                    # our JSON schema: incident.schema.json
 ├── tests/
 ├── reports/                   # generated incident reports (deliverable 3)
 └── runs/                      # per-run raw evidence + audit logs (gitignored except demo runs)
@@ -433,7 +444,7 @@ incident-zero/
 ### Key config (`config/settings.yaml`)
 
 ```yaml
-endpoints: {prometheus: http://localhost:9090, jaeger: http://localhost:16686, logs: TBD, action_api: TBD}
+endpoints: {prometheus: http://localhost:9090, jaeger: http://localhost:8080/jaeger/ui, logs: docker, action_api: http://localhost:8090}
 excluded_services: [flagd, flagd-ui]          # never queried
 llm: {provider: anthropic|openai|ollama, model: TBD, temperature: 0, max_cost_usd: 5}
 investigation: {max_steps: 12, max_tool_output_tokens: 1500, lookback_minutes: 15}
@@ -471,27 +482,26 @@ The hidden test is the largest single item, so **generalization beats polish**. 
 
 | Task | Owner |
 |------|-------|
-| Fork template repo; add `pyproject.toml`, `Makefile`, package skeleton, `pytest` passing on an empty test | B |
-| Start demo with load; confirm Jaeger, Prometheus, logs reachable; record URLs + metric names in `docs/DISCOVERY.md` | A |
-| Run `faultctl` inject → observe → reset on one practice incident; record commands | A |
-| Inspect template: JSON schema, Action API, harness entrypoint, bundle format; record in DISCOVERY.md; copy schema to `schema/` | C |
-| LLM provider smoke test (`iz llm-ping`); cost tracking stub | B |
-| `tests/test_forbidden_access.py` + `config/settings.yaml` with localhost guard | C |
+| Repo skeleton, shared tool result format (`agent/tools/common.py`), `faultctl`, architecture sketch | Hemanth (DONE) |
+| Start demo with load; confirm Jaeger, Prometheus, logs reachable; confirm metric names | Aditi |
+| Run `faultctl` inject → observe → reset on one practice incident | Hemanth |
+| LLM provider smoke test; cost tracking stub | Pavan |
+| `tests/test_forbidden_access.py` + `config/settings.yaml` with localhost guard | Mohit |
 | **Every member makes at least one commit** | all |
 
-**DoD:** demo + load running; faultctl inject/reset works; LLM key works; repo forked; 3 committers; DISCOVERY.md
-has every row of Section 3 filled or marked "asked organizers".
+**DoD:** demo + load running; faultctl inject/reset works; LLM key works; 5 committers.
 
 ### Phase 2 — "The agent can see" · Day 1 13:00–15:30 → **Checkpoint 1: Eyes (15:30, 10 pts)**
 
-1. `models.py` (Alert, ToolResult, evidence key_facts) and `evidence/store.py`.
-2. Read-only tools, in this priority order: `get_service_overview` → `search_traces`/`get_trace` → `search_logs`
-   → `get_container_health` → `get_deployment_history` → `get_service_dependencies` → `query_metric`.
-3. `tools/redaction.py` + `docker_ro.py` with exclusions; unit tests with recorded fixtures.
-4. `iz tools …` CLI for manual calls; `alerting/rules.py` minimal (error rate + p95).
-5. **Bundle backend** for at least one practice bundle (so the team isn't blocked on the live demo).
-6. Simple investigator v0: alert → overview → 2–4 adaptive LLM tool calls → **symptom summary** citing evidence IDs.
-7. One-page architecture sketch (`ARCHITECTURE.md` draft + whiteboard photo).
+**Must have by 15:30** (in parallel, each person in their own file):
+1. Aditi: `agent/tools/metrics.py` (`get_service_overview`, error rate, p95 latency) + minimal `alerting/rules.py`.
+2. Tvisha: `agent/tools/traces.py` (`search_traces`, `get_trace` with deepest failing span).
+3. Mohit: `agent/tools/containers.py` + `logs.py` (`get_container_health`, `search_logs`) through read-only `docker_ro.py`.
+4. Pavan: investigator v0: alert → overview → 2–4 adaptive LLM tool calls → **symptom summary** citing evidence.
+5. Hemanth: architecture sketch (`docs/ARCHITECTURE.md`, DONE as a draft), integration, live run with `faultctl`.
+
+**Can slip to Phase 3:** `models.py`/evidence store (use the dict format in `common.py` until then), `redaction.py`,
+`get_deployment_history`, `get_service_dependencies`, `query_metric`, `iz tools` CLI, bundle backend.
 
 **DoD / demo for CP1:** inject one practice incident live → alert fires (or is fed) → agent calls tools with visible
 rationale → prints a symptom summary with evidence IDs → show architecture sketch.
@@ -500,7 +510,8 @@ rationale → prints a symptom summary with evidence IDs → show architecture s
 
 1. Full investigator loop with hypotheses tracking, step/token budgets, kill-switch checks.
 2. Diagnoser with structured output + `evidence/validator.py` + confidence policy + `unknown`/escalate path.
-3. `reporting/schema_adapter.py` + `jsonschema` validation + markdown report v0 (diagnosis part only).
+3. Define **our JSON schema** `schema/incident.schema.json` (from Section 9 `IncidentRecord`), then
+   `reporting/schema_adapter.py` + `jsonschema` validation + markdown report v0 (diagnosis part only).
 4. Specialized tools for hard classes: `compare_hop_latency` (network), resource metrics (CPU/memory/GC),
    per-attribute error grouping in traces (single-product failures), rate-vs-baseline (load).
 5. `eval/` harness: run each practice incident (live via faultctl, or bundles), score component + category, write `eval/results.md`.
@@ -521,7 +532,8 @@ Build in this order (safety first, then capability):
 2. `state_machine.py` with guards + tests for every forbidden transition (09:50–10:20).
 3. `runbook.py` allowlist + `planner.py` → `ActionProposal` with hash (10:20–10:50).
 4. `approval/gate.py` CLI approve/reject/timeout + dry-run path (10:50–11:15).
-5. `action_client.py` (real API from DISCOVERY.md) + `executor.py` + audit logging (11:15–11:35).
+5. **Our Action API** service in `action_api/` (restart / throttle loadgen, dry-run, JSONL call log) +
+   `action_client.py` + `executor.py` + audit logging (11:15–11:35). Build the Action API service in parallel from 09:30.
 6. `verifier.py` + rollback/escalation path; full report (timeline, action, verification, prevention) (11:35–11:55).
 7. One full live rehearsal (11:55–12:00).
 
@@ -557,13 +569,15 @@ changes), kill switch (halts), and a failed-recovery path (escalates).
 
 ---
 
-## 8. Team Split (3 members — all must commit and explain their code)
+## 8. Team Split (5 members — all must commit and explain their code)
 
-| Member | Owns | Explains to judges |
-|--------|------|--------------------|
-| **A — Eyes (telemetry)** | `tools/*`, `redaction.py`, `docker_ro.py`, bundle backend, `alerting/*`, DISCOVERY.md, eval runs | How each tool queries real data; how we avoid flag data; app vs infra signals |
-| **B — Brain (agent)** | `llm/*`, `investigation/*`, `diagnosis/*`, `evidence/*`, `eval/*`, prompts | Adaptive tool choice; evidence validation; confidence policy; generalization |
-| **C — Hands (safety & action)** | `state_machine.py`, `planning/*`, `approval/*`, `execution/*`, `verification/*`, `reporting/*`, `audit/*`, forbidden-access tests | Approval gate & hash binding; dry run; kill switch; verification; rollback/escalation; schema |
+| Member | Day 1 (Eyes + Brain) | Day 2 (Hands) | Explains to judges |
+|--------|---------------------|---------------|--------------------|
+| **Aditi** | `tools/metrics.py`, `alerting/*` | `verification/*` (reuses her metric queries) | Alert rules + debounce; how recovery is checked from telemetry |
+| **Tvisha** | `tools/traces.py`, `tools/topology.py`, `compare_hop_latency` | `planning/*` (runbook allowlist + planner) | Following errors downstream; network vs app; why each action fits |
+| **Mohit** | `tools/containers.py`, `tools/logs.py`, `docker_ro.py`, `redaction.py`, `tests/test_forbidden_access.py` | `action_api/` service + `execution/action_client.py` | Read-only Docker; flag-data avoidance; the Action API allowlist + call log |
+| **Pavan** | `llm/*`, `investigation/*`, `diagnosis/*`, `evidence/*`, prompts, `eval/*` | `reporting/*` (schema adapter + markdown) | Adaptive tool choice; evidence validation; confidence policy; generalization |
+| **Hemanth** | Integration, `faultctl`, `ARCHITECTURE.md`, `schema/incident.schema.json`, live runs | `state_machine.py`, `approval/*`, `execution/{executor,killswitch}.py`, `audit/*` | Approval gate + hash binding; dry run; kill switch; state guards |
 
 Shared: `models.py` (agree on it in the first hour — it's the contract between members), README, demo.
 Pair-review each other's PRs so everyone can answer questions about the whole system.
@@ -605,7 +619,7 @@ class ApprovalRecord(BaseModel):
 class VerificationResult(BaseModel):
     recovered: bool; checks: list[dict]; evidence_ids: list[str]
 
-class IncidentRecord(BaseModel):   # mapped to the organizer schema by schema_adapter
+class IncidentRecord(BaseModel):   # mapped to our JSON schema by schema_adapter
     incident_id: str; alert: Alert; steps: list[dict]
     diagnosis: Diagnosis | None; proposal: ActionProposal | None
     approval: ApprovalRecord | None; execution: dict | None
@@ -629,7 +643,7 @@ class IncidentRecord(BaseModel):   # mapped to the organizer schema by schema_ad
 | `test_killswitch.py` | Sentinel/env/SIGINT all halt before the next tool or action call |
 | `test_validator.py` | Fabricated evidence ID / fabricated number / uncited component → rejected or confidence capped |
 | `test_redaction.py` | `feature_flag.*` attributes and excluded services never reach the LLM context |
-| `test_schema.py` | Every generated report validates against the organizer schema |
+| `test_schema.py` | Every generated report validates against our JSON schema |
 | `test_executor_failure.py` | Action API error → no recovery claimed → escalation |
 | `test_verifier.py` | Action "succeeds" but telemetry still bad → not recovered → rollback/escalate |
 | `test_config_localhost.py` | Non-localhost endpoints rejected (R6) |
@@ -670,7 +684,7 @@ Track results in `eval/results.md`; this feeds `EVALUATION.md` and the stretch "
 - [ ] Practice incidents + combinations tested; no hard-coding (forbidden-access test green)
 - [ ] Deliverables in repo: source + README, ARCHITECTURE.md, reports/, EVALUATION.md, TEAM_FORM.md
 - [ ] AI coding assistants (e.g. Claude Code) declared in team form
-- [ ] All 3 members have commits and can explain their modules
+- [ ] All 5 members have commits and can explain their modules
 - [ ] Hidden-test harness entrypoint works exactly as the organizers specified
 
 ---
@@ -693,13 +707,13 @@ Backup: a recorded offline bundle run if the live demo misbehaves (say so openly
 
 ## 13. Status Tracker (Claude Code: update this at the end of every task)
 
-**Current phase:** Phase 0 — Prep
-**Last updated:** _(date / time / who)_
+**Current phase:** Phase 2 — Eyes (CP1 at 15:30)
+**Last updated:** Day 1 ~14:45, Hemanth
 
 | Phase | Status | Notes |
 |-------|--------|-------|
-| 0 Prep | ☐ | |
-| 1 Setup & Discovery (CP0) | ☐ | DISCOVERY.md filled? |
+| 0 Prep | ☑ | Docker, Python 3.11, demo cloned |
+| 1 Setup & Discovery (CP0) | ◐ | Skeleton + faultctl + architecture draft on `dev`; demo images still downloading; Discovery filled in Section 3 |
 | 2 Eyes (CP1) | ☐ | |
 | 3 Brain (CP2) | ☐ | Practice incidents correct: _/10 |
 | 4 Hands (CP3) | ☐ | |
@@ -707,8 +721,9 @@ Backup: a recorded offline bundle run if the live demo misbehaves (say so openly
 | 6 Submission (14:00) | ☐ | Final commit SHA: |
 | 7 Hidden test & demo | ☐ | |
 
-**Open questions for organizers:** JSON schema · Action API details · harness entrypoint · deadline (14:00 vs 16:30) ·
-flag-toggle action rules · Docker read access · overnight coding allowed? · flag-evaluation span attributes allowed?
+**Open questions for organizers:** hidden-test entrypoint (how will they trigger our agent, and with which faults?) ·
+deadline (14:00 vs 16:30) · overnight coding allowed? · flag-evaluation span attributes allowed?
+(JSON schema, Action API and faultctl: organizers said define them ourselves.)
 
 **Known limitations (keep honest, copy into README at Phase 5):**
 - _(fill in as discovered)_
