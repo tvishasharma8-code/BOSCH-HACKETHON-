@@ -6,7 +6,6 @@ that is what most of these assert. Docker is faked; no daemon needed.
 import pytest
 
 from agent.tools import docker_ro, logs
-from agent.tools.common import ToolInputError
 from agent.tools.redaction import COMPOSE_PROJECT
 from tests.test_redaction import FakeClient, FakeContainer
 
@@ -116,15 +115,26 @@ def test_key_facts_are_citable_atoms():
 
 def test_bad_level_is_rejected():
     with_logs("ERROR x")
-    with pytest.raises(ToolInputError):
-        logs.search_logs("cart", level="verbose")
+    result = logs.search_logs("cart", level="verbose")
+    assert result["error"] and "level" in result["error"] and not result["key_facts"]
 
 
 def test_excluded_service_is_rejected_before_any_docker_call():
-    with_logs("ERROR x")
+    # No fake client is installed, so reaching Docker would surface a Docker error
+    # instead of the exclusion message.
     excluded = sorted(docker_ro.EXCLUDED_SERVICES)[0]
-    with pytest.raises(ToolInputError):
-        logs.search_logs(excluded)
+    result = logs.search_logs(excluded)
+    assert result["error"] and "excluded" in result["error"]
+
+
+def test_explicit_warn_level_wins_over_err_keyword():
+    # Node's pino logger writes warnings as JSON with an "err" object inside.
+    with_logs('{"level":"warn","msg":"retrying","err":{"type":"Error"}}\n'
+              '{"level":"error","msg":"charge failed"}')
+    errors = logs.search_logs("cart", level="error")
+    warns = logs.search_logs("cart", level="warn")
+    assert [f["data"]["count"] for f in errors["key_facts"]] == [1]
+    assert [f["data"]["count"] for f in warns["key_facts"]] == [1]
 
 
 def test_docker_failure_becomes_an_error_field_not_an_exception():
