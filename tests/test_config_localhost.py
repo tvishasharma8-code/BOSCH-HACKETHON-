@@ -68,7 +68,7 @@ def test_a_remote_logs_url_is_still_rejected():
 def test_committed_settings_file_is_valid_and_local():
     """The real config/settings.yaml must itself pass the R6 guard."""
     s = load_settings(DEFAULT_SETTINGS_PATH)
-    assert s.llm.model_chain[0] == "gemini-3.8-flash"
+    assert s.llm.model_chain[0] == "gemini-3-flash-preview"
     assert "gemini-2.5-flash" in s.llm.model_chain
 
 

@@ -26,8 +26,12 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 import httpx
+from dotenv import load_dotenv
 
 from agent.config import load_settings
+
+# The key lives in .env; load it here so the provider works however it's imported.
+load_dotenv()
 
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 

@@ -58,8 +58,9 @@ metrics:
 # placeholder: set it from measured usageMetadata after the first full run.
 llm:
   provider: gemini
-  model: gemini-3.8-flash
-  fallbacks: [gemini-3.5-flash, gemini-2.5-flash]
+  # Checked against the models this key can see (GET /v1beta/models).
+  model: gemini-3-flash-preview
+  fallbacks: [gemini-2.5-flash]
   temperature: 0
   timeout_s: 60
   max_retries: 2

@@ -56,8 +56,22 @@ MAX_EXAMPLE_CHARS = 220   # one example line per pattern, truncated
 DEFAULT_TAIL = 500        # lines pulled from the container before filtering
 
 
+# A structured line's own level field wins over keyword guessing: a JSON line
+# with "level":"warn" that contains an "err": object is a warning, not an error.
+_EXPLICIT_LEVEL_RE = re.compile(
+    r'"(?:level|severityText|severity)"\s*:\s*"(\w+)"', re.IGNORECASE)
+_EXPLICIT_LEVELS = {
+    "error": "error", "err": "error", "fatal": "error", "critical": "error", "panic": "error",
+    "warn": "warn", "warning": "warn",
+    "info": None, "debug": None, "trace": None,
+}
+
+
 def _level_of(line):
     """Highest severity the line looks like, or None."""
+    explicit = _EXPLICIT_LEVEL_RE.search(line)
+    if explicit and explicit.group(1).lower() in _EXPLICIT_LEVELS:
+        return _EXPLICIT_LEVELS[explicit.group(1).lower()]
     if _LEVEL_RE["error"].search(line):
         return "error"
     if _LEVEL_RE["warn"].search(line):
@@ -101,11 +115,16 @@ def search_logs(service, level="error", tail=DEFAULT_TAIL, max_patterns=MAX_PATT
 
     level: "error" (default), "warn", or "all".
     """
-    check_service(service)
-    if level not in ("error", "warn", "all"):
-        raise ToolInputError(f"level must be error, warn or all — got {level!r}")
-    levels = ("error", "warn") if level == "all" else (level,)
     query = {"service": service, "level": level, "tail": tail}
+    # Bad input comes back as an error result, like every other tool, so the
+    # agent loop can read it and try again instead of crashing.
+    try:
+        check_service(service)
+        if level not in ("error", "warn", "all"):
+            raise ToolInputError(f"level must be error, warn or all — got {level!r}")
+    except ToolInputError as exc:
+        return tool_result("search_logs", query, "invalid input", error=str(exc))
+    levels = ("error", "warn") if level == "all" else (level,)
 
     raw = docker_ro.logs(service, tail=tail)
     if raw.get("error"):
