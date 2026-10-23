@@ -46,24 +46,29 @@ def main():
     cause = culprits.most_common(1)[0][0] if culprits else worst
 
     cited = [e_over, e_ops, e_tr]
+    in_trace = set()
     if traces["key_facts"]:
-        e_one, _ = step("inspect one failing trace as a span tree",
-                        get_trace(traces["key_facts"][0]["data"]["trace_id"], worst))
+        e_one, one = step("inspect one failing trace as a span tree",
+                          get_trace(traces["key_facts"][0]["data"]["trace_id"], worst))
         cited.append(e_one)
+        in_trace = {s["service"] for s in one.get("raw") or [] if s["error"]}
     if cause != worst:
         e_cause, _ = step(f"traces point below {worst} to {cause}: which {cause} operation fails?",
                           query_metric("errors_by_operation", cause))
         cited.append(e_cause)
 
     row = next((f["data"] for f in overview["key_facts"] if f["service"] == cause), None)
-    victims = sorted(f["service"] for f in flagged if f["service"] != cause)
+    callers = sorted(s for s in in_trace if s != cause)
+    unrelated = sorted(f["service"] for f in flagged if f["service"] != cause and f["service"] not in in_trace)
     lines = [f"Most likely failing component: [bold]{cause}[/]"]
     if row:
         lines.append(f"  {cause} errors {row['error_ratio']:.1%} vs normal {row['baseline_error_ratio']:.1%}  ({e_over})")
     if culprits:
         lines.append(f"  deepest failing span in {culprits[cause]}/{sum(culprits.values())} error traces through {worst}  ({e_tr})")
-    if victims:
-        lines.append(f"  also flagged, likely callers affected by it: {', '.join(victims)}  ({e_over})")
+    if callers:
+        lines.append(f"  callers failing because of it (same trace): {', '.join(callers)}  ({cited[-1]})")
+    if unrelated:
+        lines.append(f"  also flagged, not in these traces (needs separate check): {', '.join(unrelated)}  ({e_over})")
     lines.append(f"Evidence cited: {', '.join(cited)}")
     lines.append("[dim]Symptom summary only. Root-cause diagnosis + confidence is Checkpoint 2.[/]")
     console.print(Panel("\n".join(lines), title="Symptom summary", style="yellow"))
