@@ -22,7 +22,7 @@
    `docs/DISCOVERY.md`, stop and ask the user, or inspect the template repo read-only and record what you find.
 4. **Work phase by phase.** Do not start a later phase's features until the current phase's checkpoint criteria pass.
    After 12:00 on Day 2, **no new features** — bug fixes, tests and docs only.
-5. **Keep changes small and committed often.** Each of the 3 team members must commit their own work. Do not squash
+5. **Keep changes small and committed often.** Each of the 5 team members must commit their own work. Do not squash
    other members' commits. Use commit messages like `feat(tools): add prometheus query tool`.
 6. **Every module gets a test.** Run `pytest -q` before declaring a task done.
 7. **When in doubt about safety, choose the safer option** (dry run, escalate, refuse) and leave a `# SAFETY:` comment.
