@@ -28,3 +28,45 @@ metrics:
   trend_min_rising_share: 0.7 # ... with >= 70% of steps going up
   trend_cpu_floor_cores: 0.1          # CPU trend only counts once it uses >= 0.1 cores
   trend_memory_min_rise_bytes: 52428800  # memory trend must grow by >= 50 MB
+
+# --- C (Tvisha): LLM, investigator, planner ---
+# gemini-3.8-flash answered 503 "high demand" on every Phase 0 attempt, so the
+# fallback chain is load-bearing, not a refinement. max_cost_usd is a
+# placeholder: set it from measured usageMetadata after the first full run.
+llm:
+  provider: gemini
+  model: gemini-3.8-flash
+  fallbacks: [gemini-3.5-flash, gemini-2.5-flash]
+  temperature: 0
+  timeout_s: 60
+  max_retries: 2
+  max_cost_usd: 5
+
+investigation:
+  max_steps: 12
+  max_tool_output_tokens: 1500
+  lookback_minutes: 15
+
+# --- D (Pavan): evidence, diagnosis, confidence policy ---
+policy:
+  min_confidence_to_act: 0.7
+  high_confidence_requires_types: 2
+
+# --- A (Hemanth): alerting and verification thresholds ---
+alert:
+  poll_s: 15
+  error_rate_threshold: 0.05
+  p95_latency_ms: 1500
+  debounce_polls: 2
+
+verify:
+  settle_s: 30
+  timeout_s: 180
+  consecutive_ok: 3
+
+# --- E (Aditi): approval and execution mode ---
+approval:
+  timeout_s: 600
+
+mode:
+  dry_run_default: true
