@@ -1,0 +1,30 @@
+# Shared settings. Each member edits only their own labeled section (README Section 9).
+
+# --- shared (C owns structure) ---
+endpoints:
+  prometheus: http://localhost:9090
+  jaeger: http://localhost:8080/jaeger/ui   # v3 API: /api/v3/services, /api/v3/traces
+  logs: docker
+  action_api: http://127.0.0.1:8700
+# Never queried by agent tools: diagnosis must come from telemetry, not flags (R4).
+excluded_services: [flagd, flagd-ui]
+excluded_labels: ["envkit.helper=true"]
+
+# --- A (Hemanth): metrics, traces, alerting, verification ---
+metrics:
+  default_window: 5m
+  max_window_minutes: 60
+  range_step_s: 30
+  http_timeout_s: 5
+  # Dynamic flagging: compare each service to its own normal.
+  baseline_minutes: 30        # "normal" = this many minutes...
+  baseline_skip_minutes: 5    # ...ending this long ago, so the incident itself isn't counted as normal
+  worse_factor: 3             # flag when 3x worse than its own normal
+  error_ratio_floor: 0.01     # and at least 1% errors (ignores 0.1% -> 0.3%)
+  p95_floor_ms: 200           # and p95 at least 200 ms
+  request_rate_floor: 1.0     # traffic spike must also be >= 1 req/s
+  trend_minutes: 10           # steady-rise check for memory/CPU
+  trend_min_rise: 0.2         # rose by >= 20% ...
+  trend_min_rising_share: 0.7 # ... with >= 70% of steps going up
+  trend_cpu_floor_cores: 0.1          # CPU trend only counts once it uses >= 0.1 cores
+  trend_memory_min_rise_bytes: 52428800  # memory trend must grow by >= 50 MB
