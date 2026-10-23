@@ -76,7 +76,9 @@ def _flatten(resource_spans):
                     "duration_ms": round((int(s["endTimeUnixNano"]) - int(s["startTimeUnixNano"])) / 1e6, 2),
                     "start_ns": int(s["startTimeUnixNano"]),
                     "error": status.get("code") == STATUS_ERROR,
-                    "status_message": (status.get("message") or "")[:300],
+                    # First line only: stack traces make the output unreadable.
+                    "status_message": (status.get("message") or "").strip().splitlines()[0][:300]
+                                      if status.get("message") else "",
                     "attributes": {**_attrs(s.get("attributes")), **_attrs(event_attrs)},
                 })
     return spans
@@ -151,7 +153,9 @@ def search_traces(service, errors_only=True, lookback_minutes=10, limit=20, min_
         deepest = _deepest_error(spans, service)
         if errors_only and not deepest:
             continue
-        root = min(spans, key=lambda s: s["start_ns"])
+        ids = {s["span_id"] for s in spans}
+        roots = [s for s in spans if s["parent_id"] not in ids] or spans
+        root = max(roots, key=lambda s: s["duration_ms"])  # clocks differ per service, so don't trust start times
         rows.append({
             "trace_id": trace_id,
             "root": f"{root['service']} {root['operation']}",
