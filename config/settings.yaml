@@ -1,29 +1,38 @@
-# Incident Zero settings.
-# One labelled section per member — edit only your own section (README section 9).
+# Shared settings. Each member edits only their own labeled section (README Section 9).
 
-# ---- owner C ----------------------------------------------------------------
-# All hosts must be local (R6); agent/config.py rejects anything else.
-# Jaeger is NOT on localhost:16686 (port not mapped to the host). Reach it
-# through the frontend proxy and use the v3 API — the old /api/traces 404s:
-#   GET {jaeger}/api/v3/services
-#   GET {jaeger}/api/v3/traces?query.service_name=X&query.start_time_min=...
-# Logs: the collector ships to OpenSearch but its port is not published, so the
-# log tool reads Docker logs through the read-only wrapper (owner B).
+# --- shared (C owns structure) ---
 endpoints:
   prometheus: http://localhost:9090
-  jaeger: http://localhost:8080/jaeger/ui
+  jaeger: http://localhost:8080/jaeger/ui   # v3 API: /api/v3/services, /api/v3/traces
   logs: docker
   action_api: http://127.0.0.1:8700
-
-# ---- owner B ----------------------------------------------------------------
-# Never visible to the agent's tools (R4, R13).
+# Never queried by agent tools: diagnosis must come from telemetry, not flags (R4).
 excluded_services: [flagd, flagd-ui]
 excluded_labels: ["envkit.helper=true"]
 
-# ---- owner C ----------------------------------------------------------------
-# gemini-3.8-flash returned 503 "high demand" on every Phase 0 attempt; the
-# fallback chain is load-bearing, not a nicety. max_cost_usd is a placeholder —
-# set it from measured usageMetadata after the first full run.
+# --- A (Hemanth): metrics, traces, alerting, verification ---
+metrics:
+  default_window: 5m
+  max_window_minutes: 60
+  range_step_s: 30
+  http_timeout_s: 5
+  # Dynamic flagging: compare each service to its own normal.
+  baseline_minutes: 30        # "normal" = this many minutes...
+  baseline_skip_minutes: 5    # ...ending this long ago, so the incident itself isn't counted as normal
+  worse_factor: 3             # flag when 3x worse than its own normal
+  error_ratio_floor: 0.01     # and at least 1% errors (ignores 0.1% -> 0.3%)
+  p95_floor_ms: 200           # and p95 at least 200 ms
+  request_rate_floor: 1.0     # traffic spike must also be >= 1 req/s
+  trend_minutes: 10           # steady-rise check for memory/CPU
+  trend_min_rise: 0.2         # rose by >= 20% ...
+  trend_min_rising_share: 0.7 # ... with >= 70% of steps going up
+  trend_cpu_floor_cores: 0.1          # CPU trend only counts once it uses >= 0.1 cores
+  trend_memory_min_rise_bytes: 52428800  # memory trend must grow by >= 50 MB
+
+# --- C (Tvisha): LLM, investigator, planner ---
+# gemini-3.8-flash answered 503 "high demand" on every Phase 0 attempt, so the
+# fallback chain is load-bearing, not a refinement. max_cost_usd is a
+# placeholder: set it from measured usageMetadata after the first full run.
 llm:
   provider: gemini
   model: gemini-3.8-flash
@@ -38,12 +47,12 @@ investigation:
   max_tool_output_tokens: 1500
   lookback_minutes: 15
 
-# ---- owner D ----------------------------------------------------------------
+# --- D (Pavan): evidence, diagnosis, confidence policy ---
 policy:
   min_confidence_to_act: 0.7
   high_confidence_requires_types: 2
 
-# ---- owner A ----------------------------------------------------------------
+# --- A (Hemanth): alerting and verification thresholds ---
 alert:
   poll_s: 15
   error_rate_threshold: 0.05
@@ -55,7 +64,7 @@ verify:
   timeout_s: 180
   consecutive_ok: 3
 
-# ---- owner E ----------------------------------------------------------------
+# --- E (Aditi): approval and execution mode ---
 approval:
   timeout_s: 600
 

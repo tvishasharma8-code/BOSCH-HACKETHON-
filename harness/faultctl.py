@@ -30,7 +30,7 @@ NETSHOOT_IMAGE = "nicolaka/netshoot:v0.13"
 INCIDENTS = {
     # Application faults (demo's built-in failure flags)
     "payment-failure":      [("flag", "paymentFailure", "50%")],
-    "cart-intermittent":    [("flag", "cartFailure", "25%")],
+    "cart-intermittent":    [("flag", "cartFailure", "75%")],
     "catalog-one-product":  [("flag", "productCatalogFailure", "on")],
     "recommendation-cache": [("flag", "recommendationCacheFailure", "on")],
     "ad-high-cpu":          [("flag", "adHighCpu", "on")],
