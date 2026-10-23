@@ -1,0 +1,118 @@
+{
+  "incident_id": "INC-20261023-175956-checkout",
+  "generated_at": "2026-10-23T12:29:56.958935+00:00",
+  "status": "diagnosed",
+  "alerting_service": "checkout",
+  "diagnosis": {
+    "component": "payment",
+    "category": "app_error",
+    "root_cause": "The payment service is failing to process charges specifically for users with 'loyalty_level=gold' due to an invalid token error, likely caused by a failed internal metadata lookup.",
+    "causal_chain": [
+      "frontend calls checkout/PlaceOrder",
+      "checkout calls payment/Charge",
+      "payment service fails the charge operation for users with loyalty_level=gold",
+      "payment returns 'Invalid token' error and MetadataLookupWarning",
+      "checkout and frontend report high error rates for these transactions"
+    ],
+    "confidence": 0.9,
+    "evidence_ids": [
+      "E1",
+      "E3",
+      "E4",
+      "E5"
+    ],
+    "uncertainty": "The exact reason why the token is invalid for 'gold' users is not explicitly stated, though the MetadataLookupWarning suggests a failure in an internal lookup process.",
+    "alternatives_considered": [
+      "dependency_unavailable",
+      "resource_exhaustion"
+    ]
+  },
+  "validation_problems": [],
+  "investigation": [
+    {
+      "id": "E1",
+      "tool": "get_service_overview",
+      "why": "start broad: which service is worse than its own normal?",
+      "query": {
+        "now": {
+          "request_rate": "sum by (service_name) (rate(traces_span_metrics_calls_total{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[5m]))",
+          "error_ratio": "(sum by (service_name) (rate(traces_span_metrics_calls_total{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\",status_code=\"STATUS_CODE_ERROR\"}[5m]))) / (sum by (service_name) (rate(traces_span_metrics_calls_total{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[5m])))",
+          "p50_ms": "histogram_quantile(0.5, sum by (service_name, le) (rate(traces_span_metrics_duration_milliseconds_bucket{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[5m])))",
+          "p95_ms": "histogram_quantile(0.95, sum by (service_name, le) (rate(traces_span_metrics_duration_milliseconds_bucket{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[5m])))",
+          "p99_ms": "histogram_quantile(0.99, sum by (service_name, le) (rate(traces_span_metrics_duration_milliseconds_bucket{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[5m])))"
+        },
+        "baseline": {
+          "request_rate": "sum by (service_name) (rate(traces_span_metrics_calls_total{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[30m] offset 5m))",
+          "error_ratio": "(sum by (service_name) (rate(traces_span_metrics_calls_total{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\",status_code=\"STATUS_CODE_ERROR\"}[30m] offset 5m))) / (sum by (service_name) (rate(traces_span_metrics_calls_total{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[30m] offset 5m)))",
+          "p50_ms": "histogram_quantile(0.5, sum by (service_name, le) (rate(traces_span_metrics_duration_milliseconds_bucket{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[30m] offset 5m)))",
+          "p95_ms": "histogram_quantile(0.95, sum by (service_name, le) (rate(traces_span_metrics_duration_milliseconds_bucket{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[30m] offset 5m)))",
+          "p99_ms": "histogram_quantile(0.99, sum by (service_name, le) (rate(traces_span_metrics_duration_milliseconds_bucket{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[30m] offset 5m)))"
+        },
+        "baseline_window": "30m ending 5m ago"
+      },
+      "summary": "16 services, 2 flagged (window 5m, normal = 30m ending 5m ago).\nFLAG checkout            0.04 req/s  err  44.4%  p95    3650ms  <- errors 44.4% vs normal 10.4%\nFLAG payment             0.04 req/s  err  44.4%  p95       9ms  <- errors 44.4% vs normal 10.4%\n     frontend           12.54 req/s  err   0.0%  p95    1919ms\n     frontend-proxy     12.16 req/s  err   0.0%  p95    1858ms\n     product-catalog     4.44 req/s  err   0.0%  p95    1695ms\n     recommendation      0.70 req/s  err   0.0%  p95     975ms\n     accounting          0.02 req/s  err   0.0%  p95      97ms\n     fraud-detection     0.05 req/s  err   0.0%  p95      94ms\n     shipping            0.17 req/s  err   0.0%  p95      23ms\n     cart                1.40 req/s  err   0.0%  p95      13ms\n     email               0.02 req/s  err   0.0%  p95      10ms\n     ad                  0.28 req/s  err   0.0%  p95       2ms\n     image-provider      2.85 req/s  err   0.0%  p95       2ms\n     currency            1.03 req/s  err   0.0%  p95       2ms\n     quote               0.15 req/s  err   0.0%  p95       2ms\n     telemetry-docs      0.20 req/s  err   0.0%  p95       2ms",
+      "error": null
+    },
+    {
+      "id": "E2",
+      "tool": "query_metric",
+      "why": "checkout is flagged: which of its operations is failing?",
+      "query": {
+        "template": "errors_by_operation",
+        "service": "checkout",
+        "window": "5m",
+        "range_minutes": null,
+        "promql": "sum by (span_name) (rate(traces_span_metrics_calls_total{service_name=\"checkout\",span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\",status_code=\"STATUS_CODE_ERROR\"}[5m]))"
+      },
+      "summary": "errors_by_operation for checkout (5m):\noteldemo.CheckoutService/PlaceOrder: 0.01667",
+      "error": null
+    },
+    {
+      "id": "E3",
+      "tool": "search_traces",
+      "why": "follow checkout's failing requests to the deepest failing span",
+      "query": {
+        "service": "checkout",
+        "errors_only": true,
+        "lookback_minutes": 10,
+        "limit": 20,
+        "min_duration_ms": null
+      },
+      "summary": "4 error traces through checkout in the last 10m.\nDeepest failing service across these traces: payment (4/4)\n- f851fe333e97b80ec73e7e8c4da2dbe0  4863ms  132 spans  root: load-generator user_checkout_multi\n    deepest error: payment charge: Payment request failed. Invalid token. demo.user_context.loyalty_level=gold\n- 9ce4c8d451d61d787d416737d535afb1  2909ms  84 spans  root: load-generator user_checkout_multi\n    deepest error: payment charge: Payment request failed. Invalid token. demo.user_context.loyalty_level=gold\n- 7a30edc2e6268a0f7f5ee6b12ea52c36  2864ms  84 spans  root: load-generator user_checkout_multi\n    deepest error: payment charge: Payment request failed. Invalid token. demo.user_context.loyalty_level=gold\n- 2dc0aabc3d37685892bd1d82e5c83f20  1999ms  56 spans  root: load-generator user_checkout_single\n    deepest error: payment charge: Payment request failed. Invalid token. demo.user_context.loyalty_level=gold",
+      "error": null
+    },
+    {
+      "id": "E4",
+      "tool": "get_trace",
+      "why": "inspect one failing trace",
+      "query": {
+        "trace_id": "f851fe333e97b80ec73e7e8c4da2dbe0",
+        "service": "checkout"
+      },
+      "summary": "Trace f851fe333e97b80ec73e7e8c4da2dbe0: 132 spans, 8 with errors.\nload-generator user_checkout_multi (internal, 4863ms)\n  load-generator POST (client, 3578ms) [ERROR]\n    frontend-proxy POST (server, 3577ms)\n      frontend-proxy router frontend egress (client, 3576ms) [ERROR]\n        frontend POST /api/checkout (server, 3576ms)\n          frontend POST /api/checkout (server, 3576ms)\n            frontend executing api route (pages) /api/checkout (internal, 3575ms) [ERROR]\n              frontend oteldemo.CheckoutService/PlaceOrder (client, 3575ms) [ERROR]\n                checkout oteldemo.CheckoutService/PlaceOrder (server, 3555ms) [ERROR] \"failed to charge card: could not charge the card: rpc error: code = Unknown desc = Payment request failed. Invalid token. demo.user_context.loyalty_level=gold\"\n                  checkout oteldemo.PaymentService/Charge (client, 56ms) [ERROR] \"Payment request failed. Invalid token. demo.user_context.loyalty_level=gold\"\n                    payment oteldemo.PaymentService/Charge (server, 1ms) [ERROR] \"Payment request failed. Invalid token. demo.user_context.loyalty_level=gold\"\n                      payment charge (internal, 0ms) <== DEEPEST ERROR \"Payment request failed. Invalid token. demo.user_context.loyalty_level=gold\"\nDeepest failing span: payment / charge - Payment request failed. Invalid token. demo.user_context.loyalty_level=gold",
+      "error": null
+    },
+    {
+      "id": "E5",
+      "tool": "search_logs",
+      "why": "read payment's error logs for the actual message",
+      "query": {
+        "service": "payment",
+        "level": "error",
+        "tail": 500
+      },
+      "summary": "payment: 1 error lines in the last 351 scanned, 1 distinct patterns. Top: 1x (node:1) MetadataLookupWarning: received unexpected error = All promises were rejected code = UNKNOWN",
+      "error": null
+    },
+    {
+      "id": "E6",
+      "tool": "inspect",
+      "why": "check payment's container: crashed, restarting, out of memory?",
+      "query": {
+        "service": "payment"
+      },
+      "summary": "payment: status=running exit_code=0 oom_killed=False restarts=0",
+      "error": null
+    }
+  ]
+}

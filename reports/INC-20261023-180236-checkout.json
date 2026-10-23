@@ -1,0 +1,124 @@
+{
+  "incident_id": "INC-20261023-180236-checkout",
+  "generated_at": "2026-10-23T12:32:36.169368+00:00",
+  "status": "diagnosed",
+  "alerting_service": "checkout",
+  "diagnosis": {
+    "component": "payment",
+    "category": "container_down",
+    "root_cause": "The payment service container has exited, causing the checkout service to fail with connection timeouts and name resolution errors when attempting to process payments.",
+    "causal_chain": [
+      "payment container exited",
+      "checkout service fails to connect to payment (no route to host / name resolver error)",
+      "checkout requests time out (15s) or fail immediately",
+      "checkout error rate and latency spike"
+    ],
+    "confidence": 1,
+    "evidence_ids": [
+      "E1",
+      "E2",
+      "E4",
+      "E5"
+    ],
+    "uncertainty": "The reason why the payment container exited is not explicitly stated, though some traces show 'Invalid token' application errors occurring in that service.",
+    "alternatives_considered": [
+      "app_error"
+    ]
+  },
+  "validation_problems": [],
+  "investigation": [
+    {
+      "id": "E1",
+      "tool": "get_service_overview",
+      "why": "start broad: which service is worse than its own normal?",
+      "query": {
+        "now": {
+          "request_rate": "sum by (service_name) (rate(traces_span_metrics_calls_total{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[5m]))",
+          "error_ratio": "(sum by (service_name) (rate(traces_span_metrics_calls_total{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\",status_code=\"STATUS_CODE_ERROR\"}[5m]))) / (sum by (service_name) (rate(traces_span_metrics_calls_total{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[5m])))",
+          "p50_ms": "histogram_quantile(0.5, sum by (service_name, le) (rate(traces_span_metrics_duration_milliseconds_bucket{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[5m])))",
+          "p95_ms": "histogram_quantile(0.95, sum by (service_name, le) (rate(traces_span_metrics_duration_milliseconds_bucket{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[5m])))",
+          "p99_ms": "histogram_quantile(0.99, sum by (service_name, le) (rate(traces_span_metrics_duration_milliseconds_bucket{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[5m])))"
+        },
+        "baseline": {
+          "request_rate": "sum by (service_name) (rate(traces_span_metrics_calls_total{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[30m] offset 5m))",
+          "error_ratio": "(sum by (service_name) (rate(traces_span_metrics_calls_total{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\",status_code=\"STATUS_CODE_ERROR\"}[30m] offset 5m))) / (sum by (service_name) (rate(traces_span_metrics_calls_total{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[30m] offset 5m)))",
+          "p50_ms": "histogram_quantile(0.5, sum by (service_name, le) (rate(traces_span_metrics_duration_milliseconds_bucket{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[30m] offset 5m)))",
+          "p95_ms": "histogram_quantile(0.95, sum by (service_name, le) (rate(traces_span_metrics_duration_milliseconds_bucket{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[30m] offset 5m)))",
+          "p99_ms": "histogram_quantile(0.99, sum by (service_name, le) (rate(traces_span_metrics_duration_milliseconds_bucket{span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\"}[30m] offset 5m)))"
+        },
+        "baseline_window": "30m ending 5m ago"
+      },
+      "summary": "16 services, 2 flagged (window 5m, normal = 30m ending 5m ago).\nFLAG checkout            0.05 req/s  err  66.7%  p95   15000ms  <- errors 66.7% vs normal 2.3%\nFLAG payment             0.04 req/s  err  44.4%  p95       2ms  <- errors 44.4% vs normal 2.3%\n     frontend           11.66 req/s  err   0.2%  p95    2126ms\n     frontend-proxy     11.36 req/s  err   0.2%  p95    1941ms\n     product-catalog     3.97 req/s  err   0.0%  p95    1794ms\n     recommendation      0.61 req/s  err   0.0%  p95     993ms\n     accounting          0.02 req/s  err   0.0%  p95      98ms\n     fraud-detection     0.03 req/s  err   0.0%  p95      93ms\n     email               0.02 req/s  err   0.0%  p95      40ms\n     shipping            0.19 req/s  err   0.0%  p95      24ms\n     cart                1.42 req/s  err   0.0%  p95       6ms\n     ad                  0.26 req/s  err   0.0%  p95       2ms\n     quote               0.17 req/s  err   0.0%  p95       2ms\n     currency            0.94 req/s  err   0.0%  p95       2ms\n     image-provider      2.80 req/s  err   0.0%  p95       2ms\n     telemetry-docs      0.20 req/s  err   0.0%  p95       2ms",
+      "error": null
+    },
+    {
+      "id": "E2",
+      "tool": "list_containers",
+      "why": "check container health: is anything stopped?",
+      "query": {},
+      "summary": "26 containers visible, 25 running, 1 not running. Not running: payment (exited)",
+      "error": null
+    },
+    {
+      "id": "E3",
+      "tool": "query_metric",
+      "why": "checkout is flagged: which of its operations is failing?",
+      "query": {
+        "template": "errors_by_operation",
+        "service": "checkout",
+        "window": "5m",
+        "range_minutes": null,
+        "promql": "sum by (span_name) (rate(traces_span_metrics_calls_total{service_name=\"checkout\",span_kind=~\"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER\",status_code=\"STATUS_CODE_ERROR\"}[5m]))"
+      },
+      "summary": "errors_by_operation for checkout (5m):\noteldemo.CheckoutService/PlaceOrder: 0.03333",
+      "error": null
+    },
+    {
+      "id": "E4",
+      "tool": "search_traces",
+      "why": "follow checkout's failing requests to the deepest failing span",
+      "query": {
+        "service": "checkout",
+        "errors_only": true,
+        "lookback_minutes": 10,
+        "limit": 20,
+        "min_duration_ms": null
+      },
+      "summary": "12 error traces through checkout in the last 10m.\nDeepest failing service across these traces: checkout (6/12), payment (6/12)\n- 6dcdbb1face65aad2cad49edff91ff60  16880ms  53 spans  root: load-generator user_checkout_single\n    deepest error: checkout oteldemo.PaymentService/Charge: connection error: desc = \"transport: Error while dialing: dial tcp 172.18.0.20:50051: connect: no route to host\"\n- f851fe333e97b80ec73e7e8c4da2dbe0  4863ms  132 spans  root: load-generator user_checkout_multi\n    deepest error: payment charge: Payment request failed. Invalid token. demo.user_context.loyalty_level=gold\n- 9ce4c8d451d61d787d416737d535afb1  2909ms  84 spans  root: load-generator user_checkout_multi\n    deepest error: payment charge: Payment request failed. Invalid token. demo.user_context.loyalty_level=gold\n- 7a30edc2e6268a0f7f5ee6b12ea52c36  2864ms  84 spans  root: load-generator user_checkout_multi\n    deepest error: payment charge: Payment request failed. Invalid token. demo.user_context.loyalty_level=gold\n- 2ab34992828ea6a5944d876522e0b832  2703ms  111 spans  root: load-generator user_checkout_multi\n    deepest error: checkout oteldemo.PaymentService/Charge: name resolver error: produced zero addresses\n- 2a9014c923ece4dfaa17941842a12fcd  2680ms  82 spans  root: load-generator user_checkout_multi\n    deepest error: checkout oteldemo.PaymentService/Charge: name resolver error: produced zero addresses\n- 1fb82d357cb62dd843a76b780a3bd7b9  2413ms  84 spans  root: load-generator user_checkout_multi\n    deepest error: payment charge: Payment request failed. Invalid token. demo.user_context.loyalty_level=gold\n- ddc3c3da730f14ea4221cc20670a50cb  2338ms  53 spans  root: load-generator user_checkout_single\n    deepest error: checkout oteldemo.PaymentService/Charge: name resolver error: produced zero addresses\n- c658329f47db993caa2d9d4f39826ad4  2306ms  53 spans  root: load-generator user_checkout_single\n    deepest error: checkout oteldemo.PaymentService/Charge: name resolver error: produced zero addresses\n- 64ad277d3fe7dcd76794c8787a39084e  2168ms  55 spans  root: load-generator user_checkout_single\n    deepest error: payment charge: Payment request failed. Invalid token. demo.user_context.loyalty_level=gold",
+      "error": null
+    },
+    {
+      "id": "E5",
+      "tool": "get_trace",
+      "why": "inspect one failing trace",
+      "query": {
+        "trace_id": "6dcdbb1face65aad2cad49edff91ff60",
+        "service": "checkout"
+      },
+      "summary": "Trace 6dcdbb1face65aad2cad49edff91ff60: 53 spans, 7 with errors.\nload-generator user_checkout_single (internal, 16880ms)\n  load-generator POST (client, 15004ms) [ERROR]\n    frontend-proxy POST (server, 15003ms) [ERROR]\n      frontend-proxy router frontend egress (client, 15003ms)\n        frontend POST (server, 15001ms)\n          frontend POST /api/checkout (server, 15414ms) [ERROR]\n            frontend executing api route (pages) /api/checkout (internal, 15414ms) [ERROR]\n              frontend oteldemo.CheckoutService/PlaceOrder (client, 15414ms) [ERROR]\n                checkout oteldemo.CheckoutService/PlaceOrder (server, 15298ms) [ERROR] \"failed to charge card: could not charge the card: rpc error: code = Unavailable desc = connection error: desc = \"transport: Error while dialing: dial tcp 172.18.0.20:50051: connect: no route to host\"\"\n                  checkout oteldemo.PaymentService/Charge (client, 14349ms) <== DEEPEST ERROR \"connection error: desc = \"transport: Error while dialing: dial tcp 172.18.0.20:50051: connect: no route to host\"\"\nDeepest failing span: checkout / oteldemo.PaymentService/Charge - connection error: desc = \"transport: Error while dialing: dial tcp 172.18.0.20:50051: connect: no route to host\"",
+      "error": null
+    },
+    {
+      "id": "E6",
+      "tool": "search_logs",
+      "why": "read checkout's error logs for the actual message",
+      "query": {
+        "service": "checkout",
+        "level": "error",
+        "tail": 500
+      },
+      "summary": "checkout: no error lines in the last 0 log lines.",
+      "error": null
+    },
+    {
+      "id": "E7",
+      "tool": "inspect",
+      "why": "check checkout's container: crashed, restarting, out of memory?",
+      "query": {
+        "service": "checkout"
+      },
+      "summary": "checkout: status=running exit_code=0 oom_killed=False restarts=2",
+      "error": null
+    }
+  ]
+}
