@@ -2,7 +2,7 @@
 
 > **Build plan, architecture and phase-wise execution guide for a 5-person team.**
 > This file is written so it can be handed directly to **Claude Code** to continue the work.
-> Tip: copy this file to `CLAUDE.md` at the repo root so Claude Code loads it automatically every session.
+> Don't copy this whole file into `CLAUDE.md`: at 850+ lines it's too heavy to load every session. Keep `CLAUDE.md` short and point it here.
 > The submission README (setup, running, approval gate, kill switch, limitations) is a separate file written in Phase 5.
 
 **Theme:** Agentic AI for IT Operations — *from alert to safe, approved fix.*
@@ -12,7 +12,8 @@
 
 **Important change from the brief:** the organizers are **not** providing the JSON schema, `faultctl`, the Action API
 or offline incident bundles. **We build all of them ourselves** (Section 3 and Section 5). The team has
-**5 members (A, B, C, D, E)**, not 3 as stated in the PDF.
+**5 members**, not 3 as stated in the PDF (typo):
+**A = Hemanth · B = Mohit · C = Tvisha · D = Pavan · E = Aditi.**
 
 ---
 
@@ -58,7 +59,8 @@ or offline incident bundles. **We build all of them ourselves** (Section 3 and S
 
 Scans every file under `agent/` and fails if it finds:
 - any import of `envkit` or `eval`;
-- the strings `flagd`, `demo.flagd.json`, `/feature`, `openfeature`, `.faultctl`, `answer.json`, `ground_truth` (case-insensitive);
+- the strings `flagd`, `demo.flagd.json`, `/feature`, `/flagservice`, `openfeature`, `.faultctl`, `answer.json`, `ground_truth` (case-insensitive);
+- the flag ports `8013`, `8016` (flagd) and `4000` (flag UI);
 - any known feature-flag name (list kept in the test file, not in agent code);
 - Action API `POST` usage anywhere except `agent/execution/action_client.py`.
 
@@ -107,24 +109,26 @@ to the deepest failing span, then check that component's logs and container heal
 | Alert source | Our own alert listener polling Prometheus | A | `agent/alerting/` |
 | Practice incident list | The 10 incident types listed in the brief (Section 5.3 table) | B | `envkit/faultctl/scenarios.yaml` |
 
-### Still to verify in the demo (Phase 1, record in `docs/DISCOVERY.md`)
+### Verified in the running demo (Day 1; copy into `docs/DISCOVERY.md`)
 
-| Item | How to find it | Default to try |
-|------|----------------|----------------|
-| Compose service/container names | `docker compose ps` | — |
-| Prometheus URL | `docker compose ps` | `http://localhost:9090` |
-| Jaeger query URL | `docker compose ps` | `http://localhost:16686` |
-| Logs backend | `docker compose ps` (OpenSearch?) | fallback: Docker logs |
-| Span-metric names (prefix varies by demo version) | `GET /api/v1/label/__name__/values` | `traces_span_metrics_*` |
-| flagd flag file path + exact flag names | demo repo `src/flagd/` (**envkit only — never in agent**) | `src/flagd/demo.flagd.json` |
-| Locust load generator API | `docker compose ps`; Locust web UI | `/loadgen/` via `:8080`, `POST /swarm`, `GET /stats/requests` |
-| Images needed for network faults | pull **before** the event (venue network may be slow) | `gaiaadm/pumba` or `nicolaka/netshoot` |
+| Item | Verified value |
+|------|----------------|
+| Start the demo | `make start` in the demo folder. Plain `docker compose up` leaves out Prometheus/Jaeger/Grafana. 28 containers |
+| Compose container names | Same as service names: `payment`, `checkout`, `cart`, `currency`, `valkey-cart`, … |
+| Prometheus | `http://localhost:9090`, exposed on the host ✅ |
+| Span metrics | `traces_span_metrics_calls_total` (labels `service_name`, `span_name`, `span_kind`, `status_code`; errors = `status_code="STATUS_CODE_ERROR"`) and `traces_span_metrics_duration_milliseconds_bucket` ✅ |
+| Container metrics (Prometheus) | `container_cpu_utilization_ratio`, `container_memory_usage_total_bytes`, `container_memory_usage_limit_bytes`, `container_memory_percent_ratio`, `container_network_io_*` ✅ |
+| **Jaeger** | **Not on `localhost:16686`** (port not mapped to host). Use the proxy with the **v3 API**: `http://localhost:8080/jaeger/ui/api/v3/services`, `/api/v3/traces?query.service_name=X&query.start_time_min=…&query.start_time_max=…`. The old `/api/traces` returns **404** ✅ |
+| Logs backend | Collector exports logs to **OpenSearch** (container port 9200, no fixed host port, not proxied). Use `docker logs` via the read-only wrapper, or the read-only `docker port opensearch 9200`. **Never edit compose files to expose it** (R1) |
+| flagd flag file + names | `src/flagd/demo.flagd.json`, hot-reloaded by flagd (**envkit only, never in agent**). Note: in this demo version the memory-leak flag is `emailMemoryLeak`; `recommendationCacheFailure` = "fail recommendation cache" |
+| Locust load generator | `http://localhost:8080/loadgen/` ✅. `GET /loadgen/stats/requests` returns `state`, `user_count` (default 5 users). `POST /loadgen/swarm` to change users |
+| Network-fault image | `nicolaka/netshoot:v0.13` pulled ✅ |
+| Python deps installed | httpx, requests, pydantic, docker, jsonschema, rich, typer, jinja2, pyyaml, fastapi, uvicorn, anthropic, openai, pytest ✅ |
 
 ### Questions still worth asking the organizers
 
 - How will the **hidden test** inject faults, and how should they **trigger our agent**? (We support `iz watch` and `iz investigate --alert file.json`.)
 - Is the 14:00 or 16:30 cutoff binding? Is overnight coding allowed between Day 1 and Day 2?
-- Is a 5-person team officially confirmed (PDF says 3)?
 
 ---
 
@@ -349,7 +353,8 @@ Bundle backend (`agent/tools/backends/bundle.py`, owner B) serves the same tools
 
 ### 6.3 Evidence Store & Validator — owner **D** · `agent/evidence/`
 - Store assigns `E1…En`; keeps tool, query, timestamp, summary, `key_facts` (machine-checkable atoms), raw path.
-- Validator: every cited ID exists; every quoted number / trace ID / log excerpt appears in cited evidence; at least one
+- Validator: every cited ID exists; every claim uses a **structured citation** `{evidence_id, fact_index}` pointing at a real
+  `key_facts` entry (don't parse numbers out of free text: "42%" vs `0.42` is brittle; generate prose from verified facts); at least one
   cited item references the claimed component; confidence ≥ 0.8 requires ≥ 2 different evidence types.
   Fail → agent asked once to fix; second fail → confidence capped / ESCALATE.
 
@@ -377,7 +382,8 @@ Reads the allowlist from `GET /v1/actions`. Deterministic category → candidate
 | network_degradation, multiple, unknown | — | escalate with findings |
 
 Then a short LLM call (or template) writes reason, expected impact, risks, rollback plan.
-Output `ActionProposal` with `action_hash = sha256(canonical_json(operation, target, params))`.
+Output `ActionProposal` with `action_hash = sha256(canonical_json(incident_id, action_id, operation, target, params))`,
+so an approval can never be reused for a different incident.
 
 ### 6.7 Approval Gate — owner **E** · `agent/approval/`
 CLI screen: diagnosis + evidence table, exact action, impact/risks/rollback, mode (DRY RUN / LIVE).
@@ -469,7 +475,7 @@ Dry run is the default everywhere; `--live` is required to execute.
 ### Key config (`config/settings.yaml`)
 
 ```yaml
-endpoints: {prometheus: http://localhost:9090, jaeger: http://localhost:16686, logs: auto, action_api: http://127.0.0.1:8700}
+endpoints: {prometheus: http://localhost:9090, jaeger: http://localhost:8080/jaeger/ui, logs: docker, action_api: http://127.0.0.1:8700}   # jaeger: use /api/v3/*
 excluded_services: [flagd, flagd-ui]
 excluded_labels: ["envkit.helper=true"]
 llm: {provider: anthropic|openai|ollama, model: TBD, temperature: 0, max_cost_usd: 5}
@@ -537,11 +543,11 @@ Interfaces (also D, in Block 1): `Tool` protocol (`agent/tools/base.py`), `LLMPr
 
 | Member | Role | Owns |
 |--------|------|------|
-| **A** | Eyes-1: metrics, traces & recovery | `agent/tools/{metrics,traces,topology,resources,deployments}.py`, `agent/alerting/`, `agent/verification/`, forbidden-access test, DISCOVERY.md |
-| **B** | Eyes-2 & environment: faults, logs, bundles, reports | `envkit/faultctl/`, `agent/tools/{logs,redaction,docker_ro}.py`, `agent/tools/backends/bundle.py`, `agent/reporting/`, `bundles/` |
-| **C** | Brain-1: LLM, investigator & planner | Project skeleton, `agent/llm/`, `agent/investigation/`, `agent/planning/`, `agent/cli.py` |
-| **D** | Brain-2: data model, evidence, diagnosis & eval | `agent/models.py`, `schema/`, `agent/evidence/`, `agent/diagnosis/`, `agent/tools/containers.py`, `eval/` |
-| **E** | Hands: Action API & safety | `envkit/action_api/`, `agent/state_machine.py`, `agent/execution/`, `agent/approval/`, `agent/audit/`; merges dev → main |
+| **A — Hemanth** | Eyes-1: metrics, traces & recovery | `agent/tools/{metrics,traces,topology,resources,deployments}.py`, `agent/alerting/`, `agent/verification/`, forbidden-access test, DISCOVERY.md |
+| **B — Mohit** | Eyes-2 & environment: faults, logs, bundles, reports | `envkit/faultctl/`, `agent/tools/{logs,redaction,docker_ro}.py`, `agent/tools/backends/bundle.py`, `agent/reporting/`, `bundles/` |
+| **C — Tvisha** | Brain-1: LLM, investigator & planner | Project skeleton, `agent/llm/`, `agent/investigation/`, `agent/planning/`, `agent/cli.py` |
+| **D — Pavan** | Brain-2: data model, evidence, diagnosis & eval | `agent/models.py`, `schema/`, `agent/evidence/`, `agent/diagnosis/`, `agent/tools/containers.py`, `eval/` |
+| **E — Aditi** | Hands: Action API & safety | `envkit/action_api/`, `agent/state_machine.py`, `agent/execution/`, `agent/approval/`, `agent/audit/`; merges dev → main |
 
 **Shared-file rules:** D owns `models.py` (others request changes). Each member edits only their own labeled section of
 `config/settings.yaml`. Announce new dependencies before adding them to `pyproject.toml`. C owns `Makefile`/`pyproject.toml` structure.
@@ -837,14 +843,14 @@ Backup: an offline bundle run if the live demo misbehaves (say so openly).
 
 ## 17. Status Tracker (Claude Code: update at the end of every task)
 
-**Current block:** Phase 0 — Prep
-**Last updated:** _(date / time / member)_
+**Current block:** 2 — Eyes (running behind: the Block 1/2 merge times above have passed, so merge each task as soon as it works)
+**Last updated:** Day 1 ~15:40, Hemanth (A)
 
 | Block | Status | Notes |
 |-------|--------|-------|
-| 0 Prep | ☐ | Images pulled incl. pumba/netshoot? |
-| 1 Setup (cp0) | ☐ | DISCOVERY.md filled? All 5 committed? |
-| 2 Eyes (cp1) | ☐ | |
+| 0 Prep | ☑ | Demo running on Hemanth's laptop (28 containers), netshoot pulled, all Python deps installed |
+| 1 Setup (cp0) | ◐ | On `dev` already: early skeleton (`agent/tools/common.py`, `harness/faultctl.py` with 12 working scenarios, `docs/ARCHITECTURE.md` draft, `requirements.txt`). To align with this plan: B moves faultctl → `envkit/faultctl/`, C converts to `pyproject.toml`, D replaces the dict result format with `ToolResult`. Not every member has committed yet |
+| 2 Eyes (cp1) | ◐ | A started metrics tool |
 | 3 Brain (cp2) | ☐ | Practice incidents correct: _/10 |
 | 4 Hands (cp3) | ☐ | |
 | 5 Fix & docs | ☐ | |
@@ -852,7 +858,7 @@ Backup: an offline bundle run if the live demo misbehaves (say so openly).
 | 7 Hidden test & demo | ☐ | |
 
 **Open questions for organizers:** hidden-test injection + agent trigger method · 14:00 vs 16:30 cutoff ·
-overnight coding allowed? · 5-person team confirmed?
+overnight coding allowed?
 
 **Known limitations (keep honest; copy into submission README in Block 5):**
 - `scale_service` is not available on Docker Compose (Action API returns 501).
