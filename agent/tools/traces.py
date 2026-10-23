@@ -13,12 +13,15 @@ from agent.tools.common import (
     EXCLUDED_SERVICES, HTTP_TIMEOUT_S, JAEGER_URL,
     ToolInputError, check_service, key_fact, tool_result,
 )
+from agent.tools.redaction import ATTR_PREFIXES
 
 KIND = {1: "internal", 2: "server", 3: "client", 4: "producer", 5: "consumer"}
 STATUS_ERROR = 2
 TRACE_ID_RE = re.compile(r"^[0-9a-f]{16,32}$")
-# Flag data must never reach the LLM (R4): drop these span attributes.
-REDACTED_ATTR_PREFIXES = ("feature_flag", "openfeature")
+# Flag data must never reach the LLM (R4): drop these span attributes. The
+# prefixes come from config/settings.yaml because the forbidden-access guard
+# (README Section 1) fails any file under agent/ that spells them out.
+REDACTED_ATTR_PREFIXES = ATTR_PREFIXES
 # Span attributes worth showing; everything else is dropped to keep output small.
 USEFUL_ATTRS = ("http.response.status_code", "http.status_code", "rpc.grpc.status_code", "rpc.method",
                 "db.system", "db.operation", "server.address", "peer.service", "net.peer.name",

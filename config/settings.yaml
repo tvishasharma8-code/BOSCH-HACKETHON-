@@ -10,6 +10,29 @@ endpoints:
 excluded_services: [flagd, flagd-ui]
 excluded_labels: ["envkit.helper=true"]
 
+# --- B (Mohit; covered by Tvisha): redaction, log tool, bundles, reports ---
+# The vocabulary of what must never reach the model lives HERE, not in agent/.
+# The forbidden-access guard (README Section 1) fails any file under agent/ that
+# contains these words, so agent code reads them from config instead of naming them.
+redaction:
+  # Attribute / dict keys starting with any of these are dropped.
+  attr_prefixes: [feature_flag, openfeature]
+  # Free-text lines matching any of these are dropped entirely (case-insensitive).
+  # Covers flag-evaluation chatter in service logs and the flag daemon's own output.
+  line_patterns:
+    - 'feature[_ ]?flag'
+    - 'openfeature'
+    - 'flagd'
+    - 'flag evaluation'
+    - 'variant\s*[:=]'
+  # Free-text fields that are allowlisted by key but can still echo a flag name
+  # in their value (a stack trace, an error message).
+  scrub_values_for_keys: [exception.message, error.type, summary]
+  placeholder: "[redacted]"
+  # Only containers in this compose project are visible to agent tools. An
+  # allowlist, so faultctl's unlabelled netem helper is excluded automatically (R13).
+  compose_project: opentelemetry-demo
+
 # --- A (Hemanth): metrics, traces, alerting, verification ---
 metrics:
   default_window: 5m
