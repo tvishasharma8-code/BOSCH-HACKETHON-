@@ -1,0 +1,9 @@
+requests
+docker
+pydantic
+python-dotenv
+rich
+jsonschema
+anthropic
+openai
+pytest
